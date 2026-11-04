@@ -1,4 +1,4 @@
--- custom_plates_test: Server-Side Sync & Ambient Traffic Distribution
+-- js_InfinityPlates: Server-Side Sync & Ambient Traffic Distribution
 -- Replicates custom plate slots (>= 13) across OneSync and distributes custom plates into normal population traffic
 
 local processedVehicles = {}
@@ -124,4 +124,4 @@ exports('GetVehiclePlateSlot', function(vehicle)
     return nil
 end)
 
-print('^2[CustomPlates] Server sync & population traffic module loaded!^7')
+print('^2[js_InfinityPlates] Server sync & population traffic module loaded!^7')

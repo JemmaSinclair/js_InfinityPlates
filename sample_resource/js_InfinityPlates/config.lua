@@ -33,3 +33,4 @@ Config.EligiblePopulationTypes = {
 
 -- Whether to also allow custom plates on vehicles where population type is unknown (type 0)
 Config.AllowUnknownPopulationType = false
+

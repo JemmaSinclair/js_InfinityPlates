@@ -1,4 +1,4 @@
--- custom_plates_test: Client-Side Custom License Plate System & Sync
+-- js_InfinityPlates: Client-Side Custom License Plate System & Sync
 -- Supports slots >= 13 with automatic network synchronization and ambient population traffic distribution
 
 local CustomPlateStyles = {
@@ -226,9 +226,9 @@ RegisterCommand('plate', function(source, args)
             TriggerServerEvent('customplates:setPlate', netId, targetSlot)
         end
 
-        print(('^2[CustomPlates] Vehicle plate changed to slot %d (Network synced!)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
+        print(('^2[js_InfinityPlates] Vehicle plate changed to slot %d (Network synced!)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
     else
-        print(('^1[CustomPlates] Invalid slot argument: %s^7'):format(tostring(arg)))
+        print(('^1[js_InfinityPlates] Invalid slot argument: %s^7'):format(tostring(arg)))
     end
 end, false)
 
@@ -237,12 +237,12 @@ RegisterCommand('testplates', function()
     EnsureTexturesLoaded()
 
     local totalPlates = GetNumberOfVehicleNumberPlates()
-    print(('^2[CustomPlates] Total available plates: %d (Expected >= 8)^7'):format(totalPlates))
+    print(('^2[js_InfinityPlates] Total available plates: %d (Expected >= 8)^7'):format(totalPlates))
 
     local ped = PlayerPedId()
     local veh = GetVehiclePedIsIn(ped, false)
     if veh == 0 then
-        print('^1[CustomPlates] Please sit inside a vehicle to test!^7')
+        print('^1[js_InfinityPlates] Please sit inside a vehicle to test!^7')
         return
     end
 
@@ -253,7 +253,7 @@ RegisterCommand('testplates', function()
     if netId ~= 0 then
         TriggerServerEvent('customplates:setPlate', netId, 13)
     end
-    print(('^2[CustomPlates] Set plate to slot 13 (Yankton). Current index: %d (Synced)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
+    print(('^2[js_InfinityPlates] Set plate to slot 13 (Yankton). Current index: %d (Synced)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
 
     Wait(1000)
 
@@ -263,7 +263,7 @@ RegisterCommand('testplates', function()
     if netId ~= 0 then
         TriggerServerEvent('customplates:setPlate', netId, 14)
     end
-    print(('^2[CustomPlates] Set plate to slot 14 (Epsilon). Current index: %d (Synced)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
+    print(('^2[js_InfinityPlates] Set plate to slot 14 (Epsilon). Current index: %d (Synced)^7'):format(GetVehicleNumberPlateTextIndex(veh)))
 end, false)
 
 -- Client Exports
@@ -288,4 +288,4 @@ exports('GetVehiclePlateSlot', function(veh)
     return GetVehicleNumberPlateTextIndex(veh)
 end)
 
-print('^2[CustomPlates] custom_plates_test loaded with Multiplayer Sync & Population Spawning!^7')
+print('^2[js_InfinityPlates] Resource loaded with Multiplayer Sync & Population Spawning! Use /plate [13|14|yankton|epsilon] or /testplates.^7')

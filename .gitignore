@@ -1,13 +1,51 @@
-# Visual Studio temporary files and build artifacts
+# ====================================================================
+# js_InfinityPlates .gitignore
+# ====================================================================
+
+# Visual Studio / IDE temporary files and directories
 .vs/
+.vscode/
+*.VC.db
+*.VC.opendb
+*.sln.docstates
+*.user
+*.suo
+
+# C++ Build intermediate files and artifacts
 *.obj
 *.res
 *.lib
 *.exp
 *.pdb
+*.idb
+*.ilk
+*.pch
+*.ipch
+
+# Logs and runtime dumps
 *.log
+*.dump
+*.dmp
+CustomPlates.log
 
-# Keep binary outputs in bin/
+# Temporary and backup files
+*.tmp
+*.bak
+*.cache
+*~
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Intermediate binaries in src/
+src/*.asi
+src/*.dll
+src/*.exe
+
+# Explicitly ensure release binaries and resource assets are included
 !bin/CustomPlates.asi
-!bin/extra-natives-custom.dll
-
+!sample_resource/**/stream/*.ytd
+!sample_resource/**/textures/*.png
