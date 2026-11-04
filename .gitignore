@@ -1,0 +1,13 @@
+# Visual Studio temporary files and build artifacts
+.vs/
+*.obj
+*.res
+*.lib
+*.exp
+*.pdb
+*.log
+
+# Keep binary outputs in bin/
+!bin/CustomPlates.asi
+!bin/extra-natives-custom.dll
+
