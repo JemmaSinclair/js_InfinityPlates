@@ -1,16 +1,43 @@
 #include <windows.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <string>
+#include <unordered_map>
+#include <shared_mutex>
 
-struct Component {
-    virtual bool Initialize() = 0;
-    virtual bool DoGameLoad(void* module) = 0;
-    virtual bool Shutdown() = 0;
+// rage::scrNativeCallContext layout
+struct scrNativeCallContext
+{
+    void* m_pReturn;
+    uint32_t m_nArgCount;
+    void* m_pArgs;
+    uint32_t m_nDataCount;
 };
 
-typedef Component* (*CreateComponentFn)();
+typedef void (*NativeHandler)(scrNativeCallContext* context);
+typedef void (*RegisterNativeHandlerFn)(uint64_t hash, NativeHandler handler);
+typedef NativeHandler (*GetNativeHandlerFn)(uint64_t hash);
 
-static HMODULE g_hPluginModule = NULL;
-static wchar_t g_logPath[MAX_PATH] = L"";
+static RegisterNativeHandlerFn g_registerNative = nullptr;
+static GetNativeHandlerFn g_getNative = nullptr;
+
+static NativeHandler g_origSetVehiclePlate = nullptr;
+static NativeHandler g_origGetVehiclePlate = nullptr;
+static NativeHandler g_origGetNumPlates = nullptr;
+
+static std::unordered_map<int, int> g_vehiclePlateSlots;
+static std::shared_mutex g_slotsMutex;
+
+struct CustomPlateInfo
+{
+    int index;
+    std::string name;
+    std::string txd;
+    std::string txn;
+};
+
+static std::unordered_map<int, CustomPlateInfo> g_customPlates;
+static std::shared_mutex g_platesMutex;
 
 static void Log(const char* fmt, ...)
 {
@@ -21,130 +48,201 @@ static void Log(const char* fmt, ...)
     va_end(va);
     OutputDebugStringA(buf);
 
-    if (g_logPath[0] != L'\0')
+    FILE* f = fopen("CustomPlates.log", "a");
+    if (f)
     {
-        FILE* f = _wfopen(g_logPath, L"a");
-        if (f)
-        {
-            fprintf(f, "%s\n", buf);
-            fclose(f);
-        }
+        fprintf(f, "%s\n", buf);
+        fclose(f);
     }
 }
 
-static DWORD WINAPI InitThread(LPVOID lpParam)
+// Custom handler for SET_VEHICLE_NUMBER_PLATE_TEXT_INDEX (0x9088EB5A43FFB0A1)
+static void MySetVehicleNumberPlateTextIndex(scrNativeCallContext* ctx)
 {
-    Log("[CustomPlatesLoader] Background init thread active.");
+    uint64_t* args = reinterpret_cast<uint64_t*>(ctx->m_pArgs);
+    int vehHandle = static_cast<int>(args[0]);
+    int plateIndex = static_cast<int>(args[1]);
 
-    // Small delay to allow main process initialization
-    Sleep(200);
-
-    wchar_t asiPath[MAX_PATH] = { 0 };
-    if (g_hPluginModule)
+    if (plateIndex < 13)
     {
-        GetModuleFileNameW(g_hPluginModule, asiPath, MAX_PATH);
+        if (g_origSetVehiclePlate)
+        {
+            g_origSetVehiclePlate(ctx);
+        }
+        std::unique_lock<std::shared_mutex> lock(g_slotsMutex);
+        g_vehiclePlateSlots[vehHandle] = plateIndex;
+        return;
     }
 
-    Log("[CustomPlatesLoader] ASI Module path: %ls", asiPath);
-
-    HMODULE hCustom = NULL;
-    wchar_t dllPath[MAX_PATH] = { 0 };
-
-    // Candidate 1: Same directory as CustomPlates.asi (e.g. FiveM.app\plugins\extra-natives-custom.dll)
-    if (asiPath[0] != L'\0')
+    // Custom slot (>= 13):
+    // 1. Map custom slot to an internal base index (0-4) so different custom plates can render distinct textures
+    int baseIndex = (plateIndex - 13) % 5;
+    args[1] = static_cast<uint64_t>(baseIndex);
+    if (g_origSetVehiclePlate)
     {
-        wcscpy_s(dllPath, asiPath);
-        wchar_t* slash = wcsrchr(dllPath, L'\\');
-        if (slash)
+        g_origSetVehiclePlate(ctx);
+    }
+    args[1] = plateIndex;
+
+    // 2. Track custom plate slot
+    {
+        std::unique_lock<std::shared_mutex> lock(g_slotsMutex);
+        g_vehiclePlateSlots[vehHandle] = plateIndex;
+    }
+
+    Log("[CustomPlates] Set vehicle %d to custom plate slot %d (baseIndex %d)", vehHandle, plateIndex, baseIndex);
+}
+
+// Custom handler for GET_VEHICLE_NUMBER_PLATE_TEXT_INDEX (0xF11BC2DD9A3E7195)
+static void MyGetVehicleNumberPlateTextIndex(scrNativeCallContext* ctx)
+{
+    uint64_t* args = reinterpret_cast<uint64_t*>(ctx->m_pArgs);
+    int vehHandle = static_cast<int>(args[0]);
+
+    {
+        std::shared_lock<std::shared_mutex> lock(g_slotsMutex);
+        auto it = g_vehiclePlateSlots.find(vehHandle);
+        if (it != g_vehiclePlateSlots.end() && it->second >= 13)
         {
-            *(slash + 1) = L'\0';
-            wcscat_s(dllPath, L"extra-natives-custom.dll");
-            Log("[CustomPlatesLoader] Probing Candidate 1: %ls", dllPath);
-            hCustom = LoadLibraryW(dllPath);
+            *reinterpret_cast<int*>(ctx->m_pReturn) = it->second;
+            return;
         }
     }
 
-    // Candidate 2: Parent directory (e.g. FiveM.app\extra-natives-custom.dll)
-    if (!hCustom && asiPath[0] != L'\0')
+    if (g_origGetVehiclePlate)
     {
-        wcscpy_s(dllPath, asiPath);
-        wchar_t* slash = wcsrchr(dllPath, L'\\');
-        if (slash)
+        g_origGetVehiclePlate(ctx);
+    }
+    else
+    {
+        *reinterpret_cast<int*>(ctx->m_pReturn) = 0;
+    }
+}
+
+// Custom handler for GET_NUMBER_OF_VEHICLE_NUMBER_PLATES (0x4C4D6B2644F458CB)
+static void MyGetNumberOfVehicleNumberPlates(scrNativeCallContext* ctx)
+{
+    int baseCount = 6;
+    if (g_origGetNumPlates)
+    {
+        g_origGetNumPlates(ctx);
+        baseCount = *reinterpret_cast<int*>(ctx->m_pReturn);
+        if (baseCount <= 0 || baseCount > 100)
         {
-            *slash = L'\0'; // strip filename
-            wchar_t* parentSlash = wcsrchr(dllPath, L'\\');
-            if (parentSlash)
-            {
-                *(parentSlash + 1) = L'\0';
-                wcscat_s(dllPath, L"extra-natives-custom.dll");
-                Log("[CustomPlatesLoader] Probing Candidate 2: %ls", dllPath);
-                hCustom = LoadLibraryW(dllPath);
-            }
+            baseCount = 6;
         }
     }
 
-    // Candidate 3: Standard DLL search
-    if (!hCustom)
+    int customCount = 0;
     {
-        Log("[CustomPlatesLoader] Probing Candidate 3: extra-natives-custom.dll via standard PATH");
-        hCustom = LoadLibraryW(L"extra-natives-custom.dll");
+        std::shared_lock<std::shared_mutex> lock(g_platesMutex);
+        customCount = static_cast<int>(g_customPlates.size());
     }
 
-    if (!hCustom)
+    if (customCount < 2)
     {
-        DWORD err = GetLastError();
-        Log("[CustomPlatesLoader] ERROR: Failed to load extra-natives-custom.dll (GetLastError = %lu)", err);
+        customCount = 2; // slots 13 and 14
+    }
+
+    *reinterpret_cast<int*>(ctx->m_pReturn) = baseCount + customCount;
+}
+
+// Custom helper native: REGISTER_CUSTOM_PLATE (0xA1B2C3D400000001)
+static void MyRegisterCustomPlate(scrNativeCallContext* ctx)
+{
+    uint64_t* args = reinterpret_cast<uint64_t*>(ctx->m_pArgs);
+    int index = static_cast<int>(args[0]);
+    const char* name = reinterpret_cast<const char*>(args[1]);
+    const char* txd = reinterpret_cast<const char*>(args[2]);
+    const char* txn = reinterpret_cast<const char*>(args[3]);
+
+    if (index >= 13 && name && txd && txn)
+    {
+        CustomPlateInfo info;
+        info.index = index;
+        info.name = name;
+        info.txd = txd;
+        info.txn = txn;
+
+        std::unique_lock<std::shared_mutex> lock(g_platesMutex);
+        g_customPlates[index] = info;
+        Log("[CustomPlates] Registered custom plate slot %d ('%s') -> %s/%s", index, name, txd, txn);
+    }
+
+    *reinterpret_cast<int*>(ctx->m_pReturn) = index;
+}
+
+static DWORD WINAPI WorkerThread(LPVOID)
+{
+    Log("[CustomPlates] Worker thread started. Waiting for FiveM scripting engine...");
+
+    // Wait until rage-scripting-five.dll is loaded
+    HMODULE hRage = NULL;
+    for (int i = 0; i < 60; ++i)
+    {
+        hRage = GetModuleHandleW(L"rage-scripting-five.dll");
+        if (hRage) break;
+        Sleep(500);
+    }
+
+    if (!hRage)
+    {
+        Log("[CustomPlates] ERROR: rage-scripting-five.dll not found after 30s!");
         return 1;
     }
 
-    Log("[CustomPlatesLoader] Successfully loaded extra-natives-custom.dll (Base = %p)", hCustom);
+    Log("[CustomPlates] Found rage-scripting-five.dll at %p", hRage);
 
-    auto createComponent = (CreateComponentFn)GetProcAddress(hCustom, "CreateComponent");
-    if (!createComponent)
+    // Wait for native tables to be initialized
+    Sleep(2000);
+
+    g_registerNative = reinterpret_cast<RegisterNativeHandlerFn>(
+        GetProcAddress(hRage, "?RegisterNativeHandler@scrEngine@rage@@SAX_KP6AXPEAVscrNativeCallContext@2@@Z@Z")
+    );
+
+    g_getNative = reinterpret_cast<GetNativeHandlerFn>(
+        GetProcAddress(hRage, "?GetNativeHandler@scrEngine@rage@@SAP6AXPEAVscrNativeCallContext@2@@Z_K@Z")
+    );
+
+    if (!g_registerNative || !g_getNative)
     {
-        Log("[CustomPlatesLoader] ERROR: CreateComponent export not found in extra-natives-custom.dll!");
+        Log("[CustomPlates] ERROR: Failed to resolve RegisterNativeHandler or GetNativeHandler!");
         return 2;
     }
 
-    Component* comp = createComponent();
-    if (!comp)
+    // Capture original native handlers
+    g_origSetVehiclePlate = g_getNative(0x9088EB5A43FFB0A1);
+    g_origGetVehiclePlate = g_getNative(0xF11BC2DD9A3E7195);
+    g_origGetNumPlates = g_getNative(0x4C4D6B2644F458CB);
+
+    Log("[CustomPlates] Captured original natives: SET=%p, GET=%p, NUM=%p",
+        g_origSetVehiclePlate, g_origGetVehiclePlate, g_origGetNumPlates);
+
+    // Register our unclamped plate handlers
+    g_registerNative(0x9088EB5A43FFB0A1, MySetVehicleNumberPlateTextIndex);
+    g_registerNative(0xF11BC2DD9A3E7195, MyGetVehicleNumberPlateTextIndex);
+    g_registerNative(0x4C4D6B2644F458CB, MyGetNumberOfVehicleNumberPlates);
+
+    // Register custom helper native (0xA1B2C3D400000001)
+    g_registerNative(0xA1B2C3D400000001ULL, MyRegisterCustomPlate);
+
+    // Pre-populate default custom slots 13 and 14
     {
-        Log("[CustomPlatesLoader] ERROR: CreateComponent returned nullptr!");
-        return 3;
+        std::unique_lock<std::shared_mutex> lock(g_platesMutex);
+        g_customPlates[13] = { 13, "yankton_custom", "custom_plates", "yankton_plate" };
+        g_customPlates[14] = { 14, "epsilon_custom", "custom_plates", "epsilon_plate" };
     }
 
-    Log("[CustomPlatesLoader] Calling Component::Initialize()...");
-    bool initRes = comp->Initialize();
-    Log("[CustomPlatesLoader] Component::Initialize() returned %s", initRes ? "TRUE" : "FALSE");
-
-    Log("[CustomPlatesLoader] Calling Component::DoGameLoad()...");
-    bool loadRes = comp->DoGameLoad(GetModuleHandle(NULL));
-    Log("[CustomPlatesLoader] Component::DoGameLoad() returned %s", loadRes ? "TRUE" : "FALSE");
-
-    Log("[CustomPlatesLoader] Custom plates expansion successfully hooked into FiveM!");
+    Log("[CustomPlates] Custom license plate unclamping hooks active!");
     return 0;
 }
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID)
 {
     if (fdwReason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hinstDLL);
-        g_hPluginModule = hinstDLL;
-
-        // Set log file location adjacent to CustomPlates.asi
-        wchar_t asiPath[MAX_PATH] = { 0 };
-        GetModuleFileNameW(hinstDLL, asiPath, MAX_PATH);
-        wchar_t* slash = wcsrchr(asiPath, L'\\');
-        if (slash)
-        {
-            *(slash + 1) = L'\0';
-            wcscpy_s(g_logPath, asiPath);
-            wcscat_s(g_logPath, L"custom_plates_loader.log");
-        }
-
-        Log("[CustomPlatesLoader] CustomPlates.asi attached (PID %lu)", GetCurrentProcessId());
-        CreateThread(NULL, 0, InitThread, NULL, 0, NULL);
+        CreateThread(NULL, 0, WorkerThread, NULL, 0, NULL);
     }
     return TRUE;
 }

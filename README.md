@@ -20,10 +20,9 @@ An additive vehicle license plate expansion for **FiveM** that breaks past Grand
 ```text
 License Plate Limit Increase/
 ├── bin/
-│   ├── CustomPlates.asi            # FiveM client plugin for plugins/ folder
-│   └── extra-natives-custom.dll    # Compiled native hook & registry engine
+│   └── CustomPlates.asi            # Single self-contained FiveM client plugin
 ├── src/
-│   ├── CustomPlatesLoader.cpp      # ASI loader entry point & thread initialiser
+│   ├── CustomPlatesLoader.cpp      # Standalone native unclamp & registration engine
 │   ├── CustomPlates.rc             # Multi-build resource definition (FX_ASI_BUILD)
 │   └── build.bat                   # Standalone MSVC build script
 ├── core_patches/
@@ -34,7 +33,8 @@ License Plate Limit Increase/
 │   └── custom_plates_test/         # Ready-to-use FiveM server resource
 │       ├── fxmanifest.lua
 │       ├── plates.meta             # Slot definitions (Slot 13: Yankton, Slot 14: Epsilon)
-│       ├── client.lua              # Commands (/plate, /testplates)
+│       ├── client.lua              # Client sync, streaming scope monitor, commands (/plate, /testplates)
+│       ├── server.lua              # OneSync state bag replication & broadcast handlers
 │       └── stream/
 │           └── custom_plates.ytd   # Streamed texture dictionary with plates & normals
 ├── build.bat                       # Root one-click build script
@@ -53,10 +53,8 @@ License Plate Limit Increase/
    ```text
    FiveM.app/plugins/
    ```
-3. Copy **both** files from `bin/` into `FiveM.app/plugins/`:
-   - `CustomPlates.asi`
-   - `extra-natives-custom.dll`
-4. Launch FiveM normally. Both files sit side-by-side in `plugins/` and are never touched by the auto-updater.
+3. Copy **`CustomPlates.asi`** from `bin/` into `FiveM.app/plugins/`. That's it!
+4. Launch FiveM normally. Because it lives in `plugins/`, FiveM's auto-updater will never overwrite it.
 
 ---
 
@@ -155,6 +153,23 @@ SetVehicleNumberPlateTextIndex(vehicle, 13)
 local currentPlate = GetVehicleNumberPlateTextIndex(vehicle) -- returns 13
 local totalPlates = GetNumberOfVehicleNumberPlates()         -- returns vanilla count + custom count
 ```
+
+---
+
+## Network Synchronization (Multiplayer)
+
+All custom plates ($\ge 13$) synchronize seamlessly across all connected players who have `CustomPlates.asi` installed:
+
+1. **Replicated State Bags:** Setting a vehicle's plate automatically updates `Entity(veh).state:set('plateSlot', slot, true)`, propagating across OneSync to all clients and late joiners.
+2. **Streaming Scope Monitor:** When any vehicle with a custom plate slot drives into view or spawns, nearby clients automatically detect the state and apply both the native slot index and texture replacement.
+3. **Public Exports (Client & Server):**
+   ```lua
+   -- Set plate slot from any script (client or server)
+   exports['custom_plates_test']:SetVehiclePlateSlot(vehicle, 13)
+
+   -- Read current plate slot
+   local slot = exports['custom_plates_test']:GetVehiclePlateSlot(vehicle)
+   ```
 
 ---
 

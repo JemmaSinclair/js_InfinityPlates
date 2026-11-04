@@ -9,7 +9,5 @@ files {
     'plates.meta'
 }
 
-data_file 'VEHICLE_PLATE_FILE' 'plates.meta'
-
 client_script 'client.lua'
-
+server_script 'server.lua'
