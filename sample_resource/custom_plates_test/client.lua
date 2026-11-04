@@ -1,5 +1,5 @@
 -- custom_plates_test: Client-Side Custom License Plate System & Sync
--- Supports slots >= 13 with automatic network synchronization across all players
+-- Supports slots >= 13 with automatic network synchronization and ambient population traffic distribution
 
 local CustomPlateStyles = {
     [13] = { diffuse = "yankton_plate", normal = "yankton_plate_n", baseTex = "plate01" },
@@ -7,7 +7,9 @@ local CustomPlateStyles = {
     [15] = { diffuse = "ca_exempt",     normal = "ca_exempt_n",     baseTex = "plate03" }
 }
 
--- Ensure custom texture dictionary is streamed into memory and texture replacements active
+local assignedVehicles = {}
+
+-- Ensure custom texture dictionary is streamed into memory
 local function EnsureTexturesLoaded()
     if not HasStreamedTextureDictLoaded("custom_plates") then
         RequestStreamedTextureDict("custom_plates", false)
@@ -57,9 +59,81 @@ local function ApplyVehiclePlate(veh, slot)
     end
 end
 
+-- Weighted random selector for custom plates (client-side fallback)
+local function RollCustomPlate()
+    if not Config.EnablePopulationPlates then return nil end
+
+    local rollPercent = math.random(1, 10000) / 100.0
+    if rollPercent > Config.CustomPlateChance then
+        return nil
+    end
+
+    local totalWeight = 0
+    for _, item in ipairs(Config.CustomPlates) do
+        totalWeight = totalWeight + item.weight
+    end
+
+    if totalWeight <= 0 then return nil end
+
+    local roll = math.random(1, totalWeight)
+    local current = 0
+    for _, item in ipairs(Config.CustomPlates) do
+        current = current + item.weight
+        if roll <= current then
+            return item.slot
+        end
+    end
+
+    return Config.CustomPlates[1].slot
+end
+
+-- Evaluates an ambient traffic vehicle and rolls for a custom plate if eligible
+local function CheckAndAssignPopulationVehicle(veh)
+    if not Config.EnablePopulationPlates then return end
+    if not DoesEntityExist(veh) then return end
+    if assignedVehicles[veh] then return end
+
+    -- Check if state bag already has a plateSlot assigned (by server or another client)
+    local stateSlot = Entity(veh).state.plateSlot
+    if stateSlot ~= nil then
+        assignedVehicles[veh] = true
+        if stateSlot >= 13 and GetVehicleNumberPlateTextIndex(veh) ~= stateSlot then
+            ApplyVehiclePlate(veh, stateSlot)
+        end
+        return
+    end
+
+    -- Only evaluate if local client has network control
+    if not NetworkHasControlOfEntity(veh) then
+        return
+    end
+
+    local popType = GetEntityPopulationType(veh)
+    local isEligible = Config.EligiblePopulationTypes[popType]
+    if not isEligible and Config.AllowUnknownPopulationType and popType == 0 then
+        isEligible = true
+    end
+
+    if isEligible then
+        assignedVehicles[veh] = true
+        local chosenSlot = RollCustomPlate()
+        if chosenSlot then
+            ApplyVehiclePlate(veh, chosenSlot)
+            Entity(veh).state:set('plateSlot', chosenSlot, true)
+            local netId = VehToNet(veh)
+            if netId and netId ~= 0 then
+                TriggerServerEvent('customplates:setPlate', netId, chosenSlot)
+            end
+        else
+            -- Mark evaluated as vanilla
+            Entity(veh).state:set('plateSlot', -1, true)
+        end
+    end
+end
+
 -- 1. Sync via OneSync Replicated State Bags
 AddStateBagChangeHandler('plateSlot', nil, function(bagName, key, value, _unused, replicated)
-    if not value then return end
+    if value == nil then return end
 
     -- bagName format: "entity:<netId>"
     local netId = tonumber(bagName:gsub('entity:', ''))
@@ -67,8 +141,13 @@ AddStateBagChangeHandler('plateSlot', nil, function(bagName, key, value, _unused
 
     local entity = NetworkGetEntityFromNetworkId(netId)
     if entity and entity ~= 0 and DoesEntityExist(entity) then
-        if GetVehicleNumberPlateTextIndex(entity) ~= value then
-            ApplyVehiclePlate(entity, value)
+        assignedVehicles[entity] = true
+        if value >= 13 then
+            if GetVehicleNumberPlateTextIndex(entity) ~= value then
+                ApplyVehiclePlate(entity, value)
+            end
+        elseif value >= 0 then
+            SetVehicleNumberPlateTextIndex(entity, value)
         end
     end
 end)
@@ -78,11 +157,16 @@ RegisterNetEvent('customplates:syncPlate', function(netId, slot)
     if not netId or not slot then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
-        ApplyVehiclePlate(veh, slot)
+        assignedVehicles[veh] = true
+        if slot >= 13 then
+            ApplyVehiclePlate(veh, slot)
+        elseif slot >= 0 then
+            SetVehicleNumberPlateTextIndex(veh, slot)
+        end
     end
 end)
 
--- 3. Streaming Scope Monitor: Ensures custom plates render when vehicles stream into view
+-- 3. Streaming Scope & Population Traffic Monitor
 CreateThread(function()
     while true do
         Wait(500)
@@ -94,6 +178,8 @@ CreateThread(function()
                     if GetVehicleNumberPlateTextIndex(veh) ~= slotState then
                         ApplyVehiclePlate(veh, slotState)
                     end
+                elseif slotState == nil and not assignedVehicles[veh] then
+                    CheckAndAssignPopulationVehicle(veh)
                 end
             end
         end
@@ -126,6 +212,8 @@ RegisterCommand('plate', function(source, args)
     end
 
     if targetSlot and targetSlot >= 0 then
+        assignedVehicles[veh] = true
+
         -- 1. Apply locally
         ApplyVehiclePlate(veh, targetSlot)
 
@@ -183,6 +271,7 @@ exports('SetVehiclePlateSlot', function(veh, slot)
     slot = tonumber(slot)
     if not slot or not DoesEntityExist(veh) then return false end
 
+    assignedVehicles[veh] = true
     ApplyVehiclePlate(veh, slot)
     Entity(veh).state:set('plateSlot', slot, true)
     local netId = VehToNet(veh)
@@ -195,8 +284,8 @@ end)
 exports('GetVehiclePlateSlot', function(veh)
     if not DoesEntityExist(veh) then return nil end
     local stateSlot = Entity(veh).state.plateSlot
-    if stateSlot then return stateSlot end
+    if stateSlot and stateSlot >= 0 then return stateSlot end
     return GetVehicleNumberPlateTextIndex(veh)
 end)
 
-print('^2[CustomPlates] custom_plates_test loaded with Multiplayer Sync! Use /plate [13|14|yankton|epsilon] or /testplates.^7')
+print('^2[CustomPlates] custom_plates_test loaded with Multiplayer Sync & Population Spawning!^7')

@@ -32,9 +32,10 @@ License Plate Limit Increase/
 ├── sample_resource/
 │   └── custom_plates_test/         # Ready-to-use FiveM server resource
 │       ├── fxmanifest.lua
+│       ├── config.lua              # Configurable ambient traffic spawn rates & plate weights
 │       ├── plates.meta             # Slot definitions (Slot 13: Yankton, Slot 14: Epsilon)
 │       ├── client.lua              # Client sync, streaming scope monitor, commands (/plate, /testplates)
-│       ├── server.lua              # OneSync state bag replication & broadcast handlers
+│       ├── server.lua              # OneSync state bag replication & ambient population distribution
 │       └── stream/
 │           └── custom_plates.ytd   # Streamed texture dictionary with plates & normals
 ├── build.bat                       # Root one-click build script
@@ -170,6 +171,25 @@ All custom plates ($\ge 13$) synchronize seamlessly across all connected players
    -- Read current plate slot
    local slot = exports['custom_plates_test']:GetVehiclePlateSlot(vehicle)
    ```
+
+---
+
+## Ambient Population & Traffic Spawning
+
+Custom plates can naturally appear on a configurable percentage of ambient NPC traffic in the world (e.g. 3% of road traffic and parked cars):
+
+- Configured directly in `config.lua`:
+  ```lua
+  Config.EnablePopulationPlates = true
+  Config.CustomPlateChance = 3.0 -- 3% of normal population spawns with custom plates
+
+  -- Weighted custom plate distribution
+  Config.CustomPlates = {
+      { slot = 13, name = "North Yankton", weight = 60 }, -- 60% of custom plates
+      { slot = 14, name = "Epsilon",       weight = 40 }  -- 40% of custom plates
+  }
+  ```
+- **Player-Safe:** Only targets ambient world traffic (`POPTYPE_RANDOM_AMBIENT`, `POPTYPE_RANDOM_PARKED`, etc.). Mission and player-owned vehicles (`POPTYPE_MISSION`) are excluded, protecting player garage cars from being altered.
 
 ---
 
