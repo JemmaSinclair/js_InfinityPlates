@@ -37,8 +37,9 @@ js_InfinityPlates/
 │       ├── plates.meta             # Slot definitions (Slot 13: Yankton, Slot 14: Epsilon)
 │       ├── client.lua              # Client sync, streaming scope monitor, commands (/plate, /testplates)
 │       ├── server.lua              # OneSync state bag replication & ambient population distribution
-│       └── stream/
-│           └── custom_plates.ytd   # Streamed texture dictionary with plates & normals
+│       ├── stream/
+│       │   └── custom_plates.ytd   # Streamed texture dictionary with plates & normals
+│       └── textures/               # Source PNG plate & normal textures
 ├── build.bat                       # Root one-click build script
 ├── .gitignore                      # Comprehensive git ignore rules
 ├── LICENSE                         # MIT License
@@ -47,23 +48,33 @@ js_InfinityPlates/
 
 ---
 
+## Downloads (Latest Release)
+
+Grab the pre-packaged files directly from the [**Latest Release**](https://github.com/JemmaSinclair/js_InfinityPlates/releases/tag/latest):
+
+- **[`CustomPlates.asi`](https://github.com/JemmaSinclair/js_InfinityPlates/releases/download/latest/CustomPlates.asi)** — Standalone FiveM client plugin.
+- **[`Server.Resource.zip`](https://github.com/JemmaSinclair/js_InfinityPlates/releases/download/latest/Server.Resource.zip)** — Ready-to-use `js_InfinityPlates` FiveM server resource archive.
+
+---
+
 ## Client Installation
 
-1. Navigate to your FiveM application directory (`FiveM.app/`):
+1. Download **[`CustomPlates.asi`](https://github.com/JemmaSinclair/js_InfinityPlates/releases/download/latest/CustomPlates.asi)** from the [Latest Release](https://github.com/JemmaSinclair/js_InfinityPlates/releases/tag/latest) (or copy it from `bin/CustomPlates.asi` in this repository).
+2. Navigate to your FiveM application directory (`FiveM.app/`):
    - Typically: `%localappdata%\FiveM\FiveM.app\`
-2. Open the `plugins` folder inside `FiveM.app/`:
+3. Open the `plugins` folder inside `FiveM.app/`:
    ```text
    FiveM.app/plugins/
    ```
    *(If the `plugins` folder does not exist, create it).*
-3. Copy **`CustomPlates.asi`** from `bin/` into `FiveM.app/plugins/`. That's it!
-4. Launch FiveM normally. Because it lives in `plugins/`, FiveM's auto-updater will never overwrite it.
+4. Place **`CustomPlates.asi`** inside `FiveM.app/plugins/`. That's it!
+5. Launch FiveM normally. Because it lives in `plugins/`, FiveM's auto-updater will never overwrite it.
 
 ---
 
 ## Server Setup & Testing
 
-1. Copy the `sample_resource/js_InfinityPlates` folder into your server's `resources/` directory.
+1. Download **[`Server.Resource.zip`](https://github.com/JemmaSinclair/js_InfinityPlates/releases/download/latest/Server.Resource.zip)** from the [Latest Release](https://github.com/JemmaSinclair/js_InfinityPlates/releases/tag/latest) and extract the `js_InfinityPlates` folder into your server's `resources/` directory (or copy `sample_resource/js_InfinityPlates` from this repository).
 2. In your `server.cfg`, add:
    ```cfg
    ensure js_InfinityPlates
