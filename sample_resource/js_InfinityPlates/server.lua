@@ -1,127 +1,271 @@
--- js_InfinityPlates: Server-Side Sync & Ambient Traffic Distribution
--- Replicates custom plate slots (>= 13) across OneSync and distributes custom plates into normal population traffic
+-- js_InfinityPlates / custom_plates_test: Server-Side Sync & Dynamic Slot Management
+-- Exposes full plate lists, slot lookups, and OneSync ambient population distribution
 
-local processedVehicles = {}
+local PlatesBySlot = {}
+local PlatesByName = {}
+local PlatesByState = {}
+local AllPlatesList = {}
+local assignedEntities = {}
 
--- Weighted random selector for custom plates
+-- Helper to get dictionary name for a state
+local function GetDefaultDictForState(stateName)
+    local clean = stateName:lower():gsub("%s+", "_")
+    return clean
+end
+
+local function GetDefaultLoreDictForState(stateName)
+    if stateName == "New York" then
+        return "new_york_lore_liberty"
+    end
+    return GetDefaultDictForState(stateName) .. "_lore"
+end
+
+local function InitializeDynamicSlots()
+    PlatesBySlot = {}
+    PlatesByName = {}
+    PlatesByState = {}
+    AllPlatesList = {}
+
+    local currentSlot = Config.StartingSlotIndex or 13
+    local usedSlots = {}
+
+    local flatPlates = {}
+    for key, val in pairs(Config.Plates) do
+        if type(key) == "string" and type(val) == "table" then
+            local stateName = key
+            for _, plate in ipairs(val) do
+                local copy = {}
+                for k, v in pairs(plate) do copy[k] = v end
+                copy.state = copy.state or stateName
+                copy.realDict = copy.realDict or GetDefaultDictForState(stateName)
+                copy.loreDict = copy.loreDict or GetDefaultLoreDictForState(stateName)
+                table.insert(flatPlates, copy)
+            end
+        elseif type(val) == "table" then
+            table.insert(flatPlates, val)
+        end
+    end
+
+    for _, plate in ipairs(flatPlates) do
+        if plate.slot and plate.slot >= 13 then
+            usedSlots[plate.slot] = true
+        end
+    end
+
+    for _, plate in ipairs(flatPlates) do
+        local slot = plate.slot
+        if not slot then
+            while usedSlots[currentSlot] do
+                currentSlot = currentSlot + 1
+            end
+            slot = currentSlot
+            usedSlots[slot] = true
+            currentSlot = currentSlot + 1
+        end
+
+        local entry = {
+            slot = slot,
+            state = plate.state,
+            name = plate.name,
+            tex = plate.tex,
+            diffuse = plate.tex,
+            normal = plate.normal or (plate.tex .. "_n"),
+            realDict = plate.realDict or GetDefaultDictForState(plate.state),
+            loreDict = plate.loreDict or GetDefaultLoreDictForState(plate.state),
+            pattern = plate.pattern or "11AAA111",
+            textColor = plate.textColor or 5,
+            fontExtents = plate.fontExtents,
+            weight = plate.weight ~= nil and plate.weight or 50
+        }
+
+        PlatesBySlot[slot] = entry
+        PlatesByName[plate.name:lower()] = entry
+        if not PlatesByState[plate.state] then
+            PlatesByState[plate.state] = {}
+        end
+        table.insert(PlatesByState[plate.state], entry)
+        table.insert(AllPlatesList, entry)
+    end
+end
+
+InitializeDynamicSlots()
+
+-- Weighted random selector for custom plates (only plates with weight > 0)
 local function RollCustomPlate()
     if not Config.EnablePopulationPlates then return nil end
 
-    -- Roll overall chance (e.g., 3.0 = 3%)
     local rollPercent = math.random(1, 10000) / 100.0
     if rollPercent > Config.CustomPlateChance then
         return nil
     end
 
-    local totalWeight = 0
-    for _, item in ipairs(Config.CustomPlates) do
-        totalWeight = totalWeight + item.weight
+    local serverState = Config.ServerState
+    local inStatePlates = {}
+    local inStateWeight = 0
+    local outOfStatePlates = {}
+    local outOfStateWeight = 0
+
+    for _, item in ipairs(AllPlatesList) do
+        local weight = item.weight or 0
+        -- Skip any plates with weight <= 0 (Government/Exempt/Police)
+        if weight > 0 then
+            local isServerState = serverState and (item.state:lower() == serverState:lower())
+            local isEnabled = Config.EnabledStates and Config.EnabledStates[item.state]
+
+            if isServerState then
+                table.insert(inStatePlates, item)
+                inStateWeight = inStateWeight + weight
+            elseif isEnabled then
+                table.insert(outOfStatePlates, item)
+                outOfStateWeight = outOfStateWeight + weight
+            end
+        end
     end
 
-    if totalWeight <= 0 then return nil end
+    -- If server has a specific state and in-state plates exist
+    if serverState and #inStatePlates > 0 then
+        local ratio = Config.ServerStateRatio or 90.0
+        local stateRoll = math.random(1, 10000) / 100.0
 
-    local roll = math.random(1, totalWeight)
+        if (stateRoll <= ratio or #outOfStatePlates == 0) and inStateWeight > 0 then
+            local roll = math.random(1, inStateWeight)
+            local current = 0
+            for _, item in ipairs(inStatePlates) do
+                current = current + (item.weight or 10)
+                if roll <= current then
+                    return item.slot
+                end
+            end
+            return inStatePlates[1].slot
+        end
+    end
+
+    -- Out-of-state travelers
+    local candidatePlates = (#outOfStatePlates > 0) and outOfStatePlates or inStatePlates
+    local candidateWeight = (#outOfStatePlates > 0) and outOfStateWeight or inStateWeight
+
+    if candidateWeight <= 0 or #candidatePlates == 0 then
+        return nil
+    end
+
+    local roll = math.random(1, candidateWeight)
     local current = 0
-    for _, item in ipairs(Config.CustomPlates) do
-        current = current + item.weight
+    for _, item in ipairs(candidatePlates) do
+        current = current + (item.weight or 10)
         if roll <= current then
             return item.slot
         end
     end
 
-    return Config.CustomPlates[1].slot
+    return candidatePlates[1].slot
 end
 
--- Server-side entityCreated handler for ambient population vehicles
-AddEventHandler('entityCreated', function(entity)
-    if not Config.EnablePopulationPlates then return end
+-- Hook entity creation on server (OneSync)
+AddEventHandler("entityCreated", function(entity)
     if not DoesEntityExist(entity) then return end
-    if GetEntityType(entity) ~= 2 then return end -- 2 = Vehicle
+    if GetEntityType(entity) ~= 2 then return end
 
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    if netId and netId ~= 0 and processedVehicles[netId] then return end
-
-    -- Wait briefly for entity population type and networking to initialize
-    SetTimeout(100, function()
+    CreateThread(function()
+        Wait(200)
         if not DoesEntityExist(entity) then return end
+        if assignedEntities[entity] then return end
 
-        -- If entity already has a plateSlot assigned, skip
-        if Entity(entity).state.plateSlot ~= nil then return end
-
-        local popType = GetEntityPopulationType(entity)
-        local isEligible = Config.EligiblePopulationTypes[popType]
-        if not isEligible and Config.AllowUnknownPopulationType and popType == 0 then
-            isEligible = true
+        local stateSlot = Entity(entity).state.plateSlot
+        if stateSlot ~= nil then
+            assignedEntities[entity] = true
+            return
         end
 
-        if isEligible then
-            if netId and netId ~= 0 then processedVehicles[netId] = true end
+        local popType = GetEntityPopulationType(entity)
+        local eligible = Config.EligiblePopulationTypes[popType]
+        if popType == 0 and Config.AllowUnknownPopulationType then
+            eligible = true
+        end
 
-            local chosenSlot = RollCustomPlate()
-            if chosenSlot then
-                Entity(entity).state:set('plateSlot', chosenSlot, true)
-                if netId and netId ~= 0 then
-                    TriggerClientEvent('customplates:syncPlate', -1, netId, chosenSlot)
-                end
-            else
-                -- Mark evaluated as vanilla so clients don't re-roll
-                Entity(entity).state:set('plateSlot', -1, true)
-            end
+        if not eligible then
+            assignedEntities[entity] = true
+            return
+        end
+
+        assignedEntities[entity] = true
+
+        local slot = RollCustomPlate()
+        if slot then
+            Entity(entity).state:set("plateSlot", slot, true)
         end
     end)
 end)
 
-AddEventHandler('entityRemoved', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    if netId and netId ~= 0 then
-        processedVehicles[netId] = nil
-    end
+AddEventHandler("entityRemoved", function(entity)
+    assignedEntities[entity] = nil
 end)
 
--- Event triggered by clients when a vehicle plate is modified
-RegisterNetEvent('customplates:setPlate', function(netId, slot)
-    local src = source
-    local veh = NetworkGetEntityFromNetworkId(netId)
-    if not DoesEntityExist(veh) then
-        return
-    end
+-- ============================================================================
+-- Public Server Exports
+-- ============================================================================
 
-    slot = tonumber(slot)
-    if not slot then return end
-
-    processedVehicles[netId] = true
-
-    -- Replicate slot onto the entity state bag across the network
-    Entity(veh).state:set('plateSlot', slot, true)
-
-    -- Broadcast sync event to all clients
-    TriggerClientEvent('customplates:syncPlate', -1, netId, slot)
+-- Returns the current server state configured in Config.ServerState
+exports("GetServerState", function()
+    return Config.ServerState
 end)
 
--- Server export: Set vehicle plate slot
-exports('SetVehiclePlateSlot', function(vehicle, slot)
-    if not DoesEntityExist(vehicle) then return false end
-    slot = tonumber(slot)
-    if not slot then return false end
-
-    local netId = NetworkGetNetworkIdFromEntity(vehicle)
-    if netId and netId ~= 0 then
-        processedVehicles[netId] = true
-    end
-
-    Entity(vehicle).state:set('plateSlot', slot, true)
-    if netId and netId ~= 0 then
-        TriggerClientEvent('customplates:syncPlate', -1, netId, slot)
-    end
+-- Sets the server state dynamically at runtime
+exports("SetServerState", function(state)
+    Config.ServerState = state
     return true
 end)
 
--- Server export: Get vehicle plate slot
-exports('GetVehiclePlateSlot', function(vehicle)
-    if not DoesEntityExist(vehicle) then return nil end
-    local slot = Entity(vehicle).state.plateSlot
-    if slot and slot >= 0 then return slot end
-    return nil
+-- Returns the full array of all registered plates
+exports("GetAllPlates", function()
+    return AllPlatesList
 end)
 
-print('^2[js_InfinityPlates] Server sync & population traffic module loaded!^7')
+-- Returns plate information for a specific slot number (or nil if invalid)
+exports("GetPlateBySlot", function(slot)
+    return PlatesBySlot[tonumber(slot)]
+end)
+
+-- Returns plate information by plate name
+exports("GetPlateByName", function(name)
+    if not name then return nil end
+    return PlatesByName[name:lower()]
+end)
+
+-- Returns all plates for a specific state
+exports("GetPlatesByState", function(state)
+    return PlatesByState[state] or {}
+end)
+
+-- Returns a key-value dictionary of { [slot] = "Plate Name" }
+-- Returns the configured font text color index for a specific custom plate slot
+exports("GetCustomPlateTextColor", function(slot)
+    local p = PlatesBySlot[tonumber(slot)]
+    return p and (p.textColor or 5) or 5
+end)
+
+-- Returns the configured text placement coordinates / fontExtents for a specific slot
+exports("GetCustomPlateExtents", function(slot)
+    local p = PlatesBySlot[tonumber(slot)]
+    return p and p.fontExtents or nil
+end)
+
+exports("GetPlateNames", function()
+    local names = {}
+    for slot, plate in pairs(PlatesBySlot) do
+        names[slot] = plate.name
+    end
+    return names
+end)
+
+-- Sets vehicle plate slot
+exports("SetVehiclePlateSlot", function(entity, slot)
+    if not DoesEntityExist(entity) then return false end
+    Entity(entity).state:set("plateSlot", slot, true)
+    return true
+end)
+
+-- Gets vehicle plate slot
+exports("GetVehiclePlateSlot", function(entity)
+    if not DoesEntityExist(entity) then return -1 end
+    return Entity(entity).state.plateSlot or -1
+end)
