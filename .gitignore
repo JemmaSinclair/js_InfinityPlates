@@ -45,7 +45,11 @@ src/*.asi
 src/*.dll
 src/*.exe
 
-# Explicitly ensure release binaries and resource assets are included
+# Explicitly ensure release binaries are included
 !bin/CustomPlates.asi
-!sample_resource/**/stream/*.ytd
-!sample_resource/**/textures/*.png
+
+# Custom plate texture dictionaries (.ytd)
+# Note: State-specific texture packs are not redistributed - users supply their own.
+sample_resource/**/stream/*.ytd
+!sample_resource/**/stream/custom_plates.ytd
+*.png
