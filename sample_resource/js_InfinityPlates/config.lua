@@ -78,6 +78,12 @@ Config.EnabledStates = {
 -- ============================================================================
 -- You no longer have to repeat state names, dictionary names, or boilerplate!
 --
+-- NOTE ON TEXTURE PACKS:
+-- State-specific plate texture dictionaries (.ytd files) are NOT bundled with this release.
+-- Server owners provide their own .ytd files in stream/ (e.g. oregon.ytd, california.ytd)
+-- matching the dictionary and texture names defined below, or customize Config.Plates
+-- to match your server's own plate assets.
+--
 -- Plate Options:
 --   name        (string)            Display name of the plate
 --   tex         (string)            Texture name inside the state's .ytd

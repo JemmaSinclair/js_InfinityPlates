@@ -12,7 +12,7 @@ An additive vehicle license plate expansion for **FiveM** that breaks past Grand
 - **Text Placement & Bounding Box Extents:** Native `0xA1B2C3D400000006` (`SET_CUSTOM_PLATE_EXTENTS`) enables defining custom plate text placement and bounding box coordinates (`x`, `y`, `width`, `height`) per-plate style directly from `config.lua` or dynamically via script exports.
 - **Multiplayer Network Synchronization:** Automatic OneSync replicated state bag synchronization (`Entity(veh).state.plateSlot`) ensuring all players with the plugin see custom plates on all vehicles in real-time.
 - **Proximity & Late-Joiner Streaming Scope:** Nearby vehicles streaming into view automatically receive custom plate textures with zero desync or flickering.
-- **Multi-State & 135+ Custom Plate Catalog:** Pre-packaged with 135 authentic custom plates spanning 21 US states (Oregon, California, New York, Florida, Texas, Louisiana, etc.), with both **Real-world** and **GTA lore-friendly** variants.
+- **Multi-State & 135+ Custom Plate Catalog:** Pre-configured with 135 authentic custom plates spanning 21 US states (Oregon, California, New York, Florida, Texas, Louisiana, etc.), with authentic font colors, hex palettes, placement extents, and both **Real-world** and **GTA lore-friendly** variant support.
 - **Server State Regionalization:** Set `Config.ServerState` (e.g. `'Oregon'`, `'Louisiana'`) to make ambient world traffic prioritize local state plates (e.g. 90% local traffic), with the remaining percentage drawn from out-of-state travelers.
 - **Replace Vanilla Slots 0–12:** Optional toggle (`Config.ReplaceVanillaSlots = true`) automatically rebinds vanilla plate indices 0–12 to your primary server state's plates, ensuring any vehicle spawned with default GTA plate indices displays your regional plates natively without extra scripts.
 - **Civilian vs. Government/Exempt Plates:** Government, State Trooper, Police, Sheriff, and Municipal plates are automatically weighted (`weight = 0`) to prevent ambient traffic from spawning with them, keeping them reserved for emergency vehicles, job scripts, and mechanics.
@@ -40,13 +40,13 @@ js_InfinityPlates/
 ├── sample_resource/
 │   └── js_InfinityPlates/          # Ready-to-use FiveM server resource
 │       ├── fxmanifest.lua
-│       ├── config.lua              # State Lore/Real toggles, ambient traffic spawn rates & weights
+│       ├── config.lua              # State Lore/Real toggles, ambient traffic spawn rates, font colors & extents
 │       ├── plates.meta             # 135+ Custom slot definitions across 21 US states (Slots 13–147)
 │       ├── client.lua              # Client sync, dynamic texture mapping, commands (/plate, /testplates)
 │       ├── server.lua              # OneSync state bag replication & ambient population distribution
-│       ├── stream/
-│       │   └── *.ytd               # 44 Streamed texture dictionaries (Real & Lore variants for 21 states)
-│       └── textures/               # Source PNG plate & normal textures
+│       └── stream/
+│           ├── custom_plates.ytd   # Sample plate texture dictionary (Slots 13 & 14)
+│           └── (Your State .ytds)  # Server owners drop their own plate texture dictionaries here
 ├── build.bat                       # Root one-click build script
 ├── .gitignore                      # Comprehensive git ignore rules
 ├── LICENSE                         # MIT License
@@ -129,6 +129,11 @@ In any FiveM resource, add a `plates.meta` file:
 ```
 
 Place your texture dictionary (`custom_plates.ytd`) in the resource's `stream/` folder containing your diffuse and normal map plate textures.
+
+> [!IMPORTANT]
+> **Custom Plate Textures (`.ytd` files):**
+> Due to redistribution and licensing restrictions on third-party texture packs, state-specific `.ytd` files (`oregon.ytd`, `california.ytd`, etc.) are **not** bundled in this repository.
+> The complete 135+ plate catalog in [`config.lua`](sample_resource/js_InfinityPlates/config.lua) and [`plates.meta`](sample_resource/js_InfinityPlates/plates.meta) is provided as an out-of-the-box configuration template with authentic font colors, hex palettes, and extents. Server owners simply supply their own `.ytd` files in `stream/` matching the dictionary and texture names, or customize `Config.Plates` to match their own server's plate assets.
 
 ---
 

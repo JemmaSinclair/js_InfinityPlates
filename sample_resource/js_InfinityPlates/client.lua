@@ -27,20 +27,22 @@ local VanillaPlateTextures = {
 local loadedDicts = {}
 local assignedVehicles = {}
 
--- Ensure custom texture dictionary is streamed into memory
+-- Ensure custom texture dictionary is streamed into memory (returns true if available)
 local function EnsureDictLoaded(dictName)
-    if not dictName or dictName == "" then return end
-    if loadedDicts[dictName] then return end
+    if not dictName or dictName == "" then return false end
+    if loadedDicts[dictName] ~= nil then return loadedDicts[dictName] end
 
     if not HasStreamedTextureDictLoaded(dictName) then
         RequestStreamedTextureDict(dictName, false)
         local timeout = 0
-        while not HasStreamedTextureDictLoaded(dictName) and timeout < 100 do
+        while not HasStreamedTextureDictLoaded(dictName) and timeout < 50 do
             Wait(10)
             timeout = timeout + 1
         end
     end
-    loadedDicts[dictName] = true
+    local loaded = HasStreamedTextureDictLoaded(dictName)
+    loadedDicts[dictName] = loaded
+    return loaded
 end
 
 -- Determine which dictionary to use for a style based on Config.StateLoreMode
@@ -110,10 +112,11 @@ local function SetupTextureReplacements()
 
         local dict = GetStyleDict(style)
         if dict and style.baseTex and style.diffuse then
-            EnsureDictLoaded(dict)
-            AddReplaceTexture("vehshare", style.baseTex, dict, style.diffuse)
-            if style.normal then
-                AddReplaceTexture("vehshare", style.baseTex .. "_n", dict, style.normal)
+            if EnsureDictLoaded(dict) then
+                AddReplaceTexture("vehshare", style.baseTex, dict, style.diffuse)
+                if style.normal then
+                    AddReplaceTexture("vehshare", style.baseTex .. "_n", dict, style.normal)
+                end
             end
         end
     end
@@ -138,8 +141,7 @@ local function SetupTextureReplacements()
                 local repPlate = validPlates[(idx % #validPlates) + 1]
                 if targetTex and repPlate then
                     local dict = GetStyleDict(repPlate)
-                    if dict then
-                        EnsureDictLoaded(dict)
+                    if dict and EnsureDictLoaded(dict) then
                         AddReplaceTexture("vehshare", targetTex.diffuse, dict, repPlate.diffuse)
                         if targetTex.normal and repPlate.normal then
                             AddReplaceTexture("vehshare", targetTex.normal, dict, repPlate.normal)
@@ -166,8 +168,7 @@ local function ApplyVehiclePlate(veh, slot)
         ApplyPlateFontAndExtents(slot, style)
 
         local dict = GetStyleDict(style)
-        if dict then
-            EnsureDictLoaded(dict)
+        if dict and EnsureDictLoaded(dict) then
             if style.baseTex and style.diffuse then
                 AddReplaceTexture("vehshare", style.baseTex, dict, style.diffuse)
                 if style.normal then
